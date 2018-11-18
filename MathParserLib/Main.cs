@@ -14,8 +14,9 @@ namespace MathParserLib
     public class TextProcessor
     {
         static char[] numeralChars = new char[] { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' };
+        static char[] letterChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ".ToCharArray();
         static char[] symbolChars = new char[] { '(', ')' };
-        static char[] operatorChars = new char[] { '+', '-', '*', '/' };
+        static char[] operatorChars = new char[] { '+', '-', '*', '/', 'p', '<', '>' };
         public static Queue<Word> ProcessString(string str)
         {
             Queue<Word> temp = new Queue<Word>();
@@ -25,7 +26,7 @@ namespace MathParserLib
                 chars.Enqueue(c);
             }
 
-            while(chars.Count > 0)
+            while (chars.Count > 0)
             {
                 if (chars.Peek() == ' ')
                 {
@@ -74,8 +75,27 @@ namespace MathParserLib
                         case '/':
                             temp.Enqueue(new Word(Word.CharacterType.Operator, null, "", Word.OperatorType.Divide, null));
                             break;
+                        case 'p':
+                            temp.Enqueue(new Word(Word.CharacterType.Operator, null, "", Word.OperatorType.Print, null));
+                            break;
+                        case '<':
+                            temp.Enqueue(new Word(Word.CharacterType.Operator, null, "", Word.OperatorType.SetVar, null));
+                            break;
+                        case '>':
+                            temp.Enqueue(new Word(Word.CharacterType.Operator, null, "", Word.OperatorType.GetVar, null));
+                            break;
 
                     }
+                    continue;
+                }
+                if (isLetter(chars.Peek()))
+                {
+                    string word = String.Empty;
+                    while (chars.Count > 0 && !isOperator(chars.Peek()) && chars.Peek() != ' ')
+                    {
+                        word += chars.Dequeue();
+                    }
+                    temp.Enqueue(new Word(Word.CharacterType.Text, null, word));
                     continue;
                 }
                 temp.Enqueue(new Word(Word.CharacterType.Unexpected, null, chars.Dequeue().ToString()));
@@ -94,13 +114,31 @@ namespace MathParserLib
         {
             return operatorChars.Contains(c);
         }
+        static bool isLetter(char c)
+        {
+            return letterChars.Contains(c);
+        }
     }
     public class Chunker
     {
-        static Add add = new Add();
-        static Subtract subtract = new Subtract();
-        static Multiply multiply = new Multiply();
-        static Divide divide = new Divide();
+        static Add add;
+        static Subtract subtract;
+        static Multiply multiply;
+        static Divide divide;
+        static Print print;
+        static GetVar getVar;
+        static SetVar setVar;
+
+        public static void SetEnvironment(Environment e)
+        {
+            add = new Add(e);
+            subtract = new Subtract(e);
+            multiply = new Multiply(e);
+            divide = new Divide(e);
+            print = new Print(e);
+            getVar = new GetVar(e);
+            setVar = new SetVar(e);
+        }
 
         public static Chunk Chunkify(Queue<Word> input)
         {
@@ -116,6 +154,11 @@ namespace MathParserLib
         public static Chunk Chunkify(Queue<object> input)
         {
             Chunk c = null;
+
+            if (input.Count < 1)
+            {
+                return Chunk.Empty;
+            }
             /*
             Stack<Chunk> pile = new Stack<Chunk>();
             while (words.Count > 0)
@@ -174,12 +217,12 @@ namespace MathParserLib
             object[] expression = input.ToArray();
 
             //Process expressions in parentheses into single chunks
-            while(ContainsOpenParentheses(expression))
+            while (ContainsOpenParentheses(expression))
             {
                 expression = ProcessParentheses(expression);
             }
 
-            
+
 
             // Check if the expression contains any operators
             while (ContainsOperators(expression))
@@ -222,7 +265,7 @@ namespace MathParserLib
                             }
                         }
                     }
-                }          
+                }
             }
             c = (Chunk)expression.First();
 
@@ -238,51 +281,67 @@ namespace MathParserLib
             int length = endIndex - startIndex;
 
             Chunk[] left = new Chunk[operation.GetAmountOfArgumentsOnLeft()], right = new Chunk[operation.GetAmountOfArgumentsOnRight()];
-
-            // Process left side
-            for (int i = startIndex; i < index; i++)
+            string errorMessage = String.Empty;
+            if (startIndex < 0)
             {
-                if (expression[i] is Word)
-                {
-                    Word word = (Word)expression[i];
-                    if (word.GetCharacterType() == Word.CharacterType.Text || word.GetCharacterType() == Word.CharacterType.Number)
-                    {
-                        left[i - startIndex] = new Chunk(word);
-                    }
-                    else
-                    {
-                        //TODO: Thrown an error, invalid syntax, unexpected operator, symbol or unexpected error somewhere else
-                    }
-                }
-                else if (expression[i] is Chunk)
-                {
-                    left[i - startIndex] = (Chunk)expression[i];
-                }
-
+                errorMessage = "Invalid amount of arguments on left side.";
             }
-
-            // Process right side
-            for (int i = index + 1; i <= endIndex; i++)
+            else if (endIndex >= expression.Length)
             {
-                if (expression[i] is Word)
+                errorMessage = "Invalid amount of arguments on right side.";
+            }
+            else
+            {
+                // Process left side
+                for (int i = startIndex; i < index; i++)
                 {
-                    Word word = (Word)expression[i];
-                    if (word.GetCharacterType() == Word.CharacterType.Text || word.GetCharacterType() == Word.CharacterType.Number)
+                    if (expression[i] is Word)
                     {
-                        right[i - 1 - index] = new Chunk(word);
+                        Word word = (Word)expression[i];
+                        if (word.GetCharacterType() == Word.CharacterType.Text || word.GetCharacterType() == Word.CharacterType.Number)
+                        {
+                            left[i - startIndex] = new Chunk(word);
+                        }
+                        else
+                        {
+                            // Thrown an error, invalid syntax, unexpected operator, symbol or unexpected error somewhere else
+                            errorMessage = "Invalid syntax: Unexpected " + word.GetCharacterType();
+                        }
                     }
-                    else
+                    else if (expression[i] is Chunk)
                     {
-                        //TODO: Thrown an error, invalid syntax, unexpected operator, symbol or unexpected error somewhere else
+                        left[i - startIndex] = (Chunk)expression[i];
                     }
+
                 }
-                else if (expression[i] is Chunk)
+
+                // Process right side
+                for (int i = index + 1; i <= endIndex; i++)
                 {
-                    right[i - 1 - index] = (Chunk)expression[i];
+                    if (expression[i] is Word)
+                    {
+                        Word word = (Word)expression[i];
+                        if (word.GetCharacterType() == Word.CharacterType.Text || word.GetCharacterType() == Word.CharacterType.Number)
+                        {
+                            right[i - 1 - index] = new Chunk(word);
+                        }
+                        else
+                        {
+                            // Thrown an error, invalid syntax, unexpected operator, symbol or unexpected error somewhere else
+                            errorMessage = "Invalid syntax: Unexpected " + word.GetCharacterType();
+                        }
+                    }
+                    else if (expression[i] is Chunk)
+                    {
+                        right[i - 1 - index] = (Chunk)expression[i];
+                    }
                 }
             }
-
-            Chunk c = new Chunk(operation, left, right);
+            Chunk c;
+            if (errorMessage == String.Empty)
+                c = new Chunk(operation, left, right);
+            else
+                c = new ProgramException(errorMessage);
             object[] processedExpression = new object[expression.Length - length + 1];
             for (int i = 0; i < expression.Length; i++)
             {
@@ -310,6 +369,7 @@ namespace MathParserLib
         {
             int? startIndex, endIndex, currentLevel = 0;
             startIndex = endIndex = null;
+            string errorMessage = String.Empty;
             for (int i = 0; i < expression.Length; i++)
             {
                 if (expression[i] is Word)
@@ -322,6 +382,7 @@ namespace MathParserLib
                             if (startIndex == null)
                             {
                                 startIndex = i;
+                                currentLevel++;
                             }
                             else
                             {
@@ -330,52 +391,63 @@ namespace MathParserLib
                         }
                         else if (w.GetSymbol() == Word.SymbolType.ParenthesesClose)
                         {
-                            //TODO: Handle no open only closed
+                            currentLevel--;
+
                             if (currentLevel == 0)
                             {
                                 endIndex = i;
                                 break;
                             }
-                            else
-                                currentLevel--;
                         }
                     }
                 }
+                // Handle no open only closed
+                if (currentLevel < 0)
+                    errorMessage = "Unexpected \")\" are you missing \"(\"?";
+
             }
+
+            int length = endIndex.Value - startIndex.Value;
+            object[] processedExpression = new object[expression.Length - length];
+            Chunk c = null;
             if (startIndex != null && endIndex != null)
             {
-                int length = endIndex.Value - startIndex.Value;
-                object[] processedExpression = new object[expression.Length - length + 1];
+                
+                
                 Queue<object> subExpression = new Queue<object>();
-                Chunk c;
+                
                 for (int i = startIndex.Value + 1; i < endIndex.Value; i++)
                 {
-                    subExpression.Enqueue(expression[i]);                    
+                    subExpression.Enqueue(expression[i]);
                 }
                 c = Chunkify(subExpression);
-                for (int i = 0; i < expression.Length; i++)
-                {
-                    if (i > endIndex.Value)
-                    {
-                        processedExpression[i - endIndex.Value] = expression[i];
-                    }
-                    else if (i > startIndex.Value)
-                    {
-                        continue;
-                    } 
-                    else if (i == startIndex.Value)
-                    {
-                        processedExpression[i] = c;
-                    }
-                    else
-                    {
-                        processedExpression[i] = expression[i];
-                    }                   
-                }
-                return processedExpression;
             }
-            //TODO Return a type containing an object[] and potential error message
-            return expression;
+            // Return an exception if there is an issue
+            if(errorMessage != String.Empty)
+                c = new ProgramException(errorMessage);
+
+            for (int i = 0; i < expression.Length; i++)
+            {
+                if (i > endIndex.Value)
+                {
+                    processedExpression[i - endIndex.Value] = expression[i];
+                }
+                else if (i > startIndex.Value)
+                {
+                    continue;
+                }
+                else if (i == startIndex.Value)
+                {
+                    processedExpression[i] = c;
+                }
+                else
+                {
+                    processedExpression[i] = expression[i];
+                }
+            }
+            return processedExpression;
+
+
         }
 
         static bool ContainsOperators(object[] expression)
@@ -434,6 +506,12 @@ namespace MathParserLib
                     return multiply;
                 case Word.OperatorType.Divide:
                     return divide;
+                case Word.OperatorType.Print:
+                    return print;
+                case Word.OperatorType.SetVar:
+                    return setVar;
+                case Word.OperatorType.GetVar:
+                    return getVar;
             }
 
             return null;
@@ -445,7 +523,12 @@ namespace MathParserLib
         Word word;
         Chunk[] left;
         Chunk[] right;
-        
+
+        protected Chunk()
+        {
+
+        }
+
         public Chunk(Word w)
         {
             word = w;
@@ -458,7 +541,7 @@ namespace MathParserLib
             this.right = right;
         }
 
-        public Result Evaluate()
+        public virtual Result Evaluate()
         {
             if (operation == null)
             {
@@ -471,12 +554,69 @@ namespace MathParserLib
             if (left == null || right == null)
                 return Result.Unexpected("Encountered a chunk missing a left or right side.");
 
-            return operation.Evaluate((Result)left.First(), (Result)right.First());
+            return operation.Evaluate((Result)left.FirstOrDefault(), (Result)right.FirstOrDefault());
+        }
+
+        public static Chunk Empty
+        {
+            get
+            {
+                return new Chunk();
+            }
+        }
+    }
+
+    public abstract class Environment
+    {
+        Dictionary<string, Result> memory = new Dictionary<string, Result>();
+        public abstract void Print(string text);
+        public void SetVar(string varname, Result r)
+        {
+            if (memory.ContainsKey(varname))
+            {
+                memory[varname] = r;
+            }
+            else
+            {
+                memory.Add(varname, r);
+            }
+        }
+
+        public Result GetVar(string varname)
+        {
+            if (memory.ContainsKey(varname))
+            {
+                return memory[varname];
+            }
+            else
+            {
+                return Result.Unexpected("You are trying to access undefined variable \"" + varname + "\".");
+            }
+        }
+    }
+
+    public class ProgramException : Chunk
+    {
+        string errorMessage;
+        public ProgramException(string errorMessage)
+        {
+            this.errorMessage = errorMessage;
+        }
+        public override Result Evaluate()
+        {
+            return Result.Unexpected(errorMessage);
         }
     }
 
     public abstract class Operation
     {
+        protected Environment environment;
+        public Operation(Environment e)
+        {
+            environment = e;
+        }
+
+
         public abstract Result Evaluate(Result left, Result right);
         public virtual int GetAmountOfArgumentsOnLeft()
         {
@@ -564,6 +704,8 @@ namespace MathParserLib
         }
         public static explicit operator Result(Chunk w)
         {
+            if (w == null)
+                return null;
             return w.Evaluate();
         }
 
@@ -643,6 +785,14 @@ namespace MathParserLib
         }
         #endregion
 
+        public string GetText()
+        {
+            return resultText;
+        }
+        public int GetNumber()
+        {
+            return resultNumber;
+        }
         public override string ToString()
         {
             return String.Format("Result ( Type: {0}, Number: {1}, Result Text: {3}, Error Message: {2} )", resultType.ToString(), resultNumber.ToString(), errorMessage, resultText);
@@ -672,7 +822,7 @@ namespace MathParserLib
         }
         public enum OperatorType
         {
-            Empty, Plus, Minus, Multiply, Divide
+            Empty, Plus, Minus, Multiply, Divide, SetVar, GetVar, Print
         }
         public enum SymbolType
         {
